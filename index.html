@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+    <meta charset="UTF-8">
+    <title>SportCast</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="bg-gray-100">
+
+<header class="header-gradient shadow-lg p-6 text-center text-white text-3xl font-semibold">
+    SportCast Коментари
+</header>
+
+<div class="container mx-auto px-4 max-w-4xl mt-8">
+
+    <div class="flex flex-wrap gap-3 mb-6">
+        <input id="videoUrl" type="text"
+               class="flex-1 p-3 rounded-xl border border-gray-300"
+               placeholder="Поставете линк към YouTube видео...">
+        <button onclick="startIngestion()"
+                class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl">
+            Анализирай
+        </button>
+    </div>
+
+    <div id="status" class="text-lg font-semibold mb-4"></div>
+
+    <h2 class="text-2xl font-semibold mt-10 mb-4">Видеа</h2>
+    <div id="videoList" class="flex flex-col gap-4"></div>
+
+    <h2 class="text-2xl font-semibold mt-10 mb-4">Филтри</h2>
+
+    <div class="flex flex-wrap gap-4 mb-6">
+        <select id="sort" class="select-field">
+            <option value="most_recent">Най-нови</option>
+            <option value="most_liked">Най-харесвани</option>
+        </select>
+
+        <select id="category" class="select-field">
+            <option value="">Всички категории</option>
+            <option value="Opinion">Мнение</option>
+            <option value="Question">Въпрос</option>
+            <option value="Feedback">Обратна връзка</option>
+            <option value="Praise">Похвала</option>
+            <option value="Hate Speech">Хейт</option>
+        </select>
+
+        <select id="team" class="select-field">
+            <option value="">Всички отбори</option>
+            <option value="ЦСКА">ЦСКА</option>
+            <option value="Левски">Левски</option>
+            <option value="Ботев (Пловдив)">Ботев (Пловдив)</option>
+            <option value="Локомотив (Пловдив)">Локомотив (Пловдив)</option>
+            <option value="Берое">Берое</option>
+            <option value="Черно море">Черно море</option>
+            <option value="Лудогорец">Лудогорец</option>
+        </select>
+
+        <button onclick="loadComments()"
+                class="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl">
+            Обнови
+        </button>
+    </div>
+
+    <div id="comments" class="mt-6"></div>
+</div>
+
+<script>
+const API = "https://sportscast-production.up.railway.app";
+let currentVideoId = null;
+
+function extractVideoId(url) {
+    if (!url) return null;
+    const m1 = url.match(/v=([a-zA-Z0-9_-]{11})/);
+    if (m1) return m1[1];
+    const m2 = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+    if (m2) return m2[1];
+    return null;
+}
+
+async function loadVideos() {
+    const res = await fetch(`${API}/videos`);
+    const data = await res.json();
+    const list = document.getElementById("videoList");
+    list.innerHTML = "";
+
+    data.videos.forEach(v => {
+        const div = document.createElement("div");
+        div.className = "video-card";
+        div.onclick = () => {
+            currentVideoId = v.video_id;
+            loadComments(v.video_id);
+        };
+
+        div.innerHTML = `
+            <img src="${v.thumbnail}" class="thumb">
+            <div>
+                <div class="font-semibold text-lg">${v.title}</div>
+                <div class="text-sm text-gray-600">${new Date(v.published_at).toLocaleString()}</div>
+            </div>
+        `;
+
+        list.appendChild(div);
+    });
+}
+
+async function startIngestion() {
+    const url = document.getElementById("videoUrl").value.trim();
+    const status = document.getElementById("status");
+    const vid = extractVideoId(url);
+
+    if (!vid) { status.innerHTML = "❌ Невалиден линк."; return; }
+
+    status.innerHTML = "⏳ Обработка...";
+
+    await fetch(`${API}/ingest_video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url })
+    });
+
+    currentVideoId = vid;
+
+    setTimeout(async () => {
+        await loadComments(vid);
+        await loadVideos();
+        status.innerHTML = "✅ Готово!";
+    }, 3000);
+}
+
+async function loadComments(forceVideo = null) {
+    const vid = forceVideo || currentVideoId;
+    const sort = document.getElementById("sort").value;
+    const cat = document.getElementById("category").value;
+    const team = document.getElementById("team").value;
+
+    let url = `${API}/comments?sort_by=${sort}`;
+    if (vid) url += `&video_id=${vid}`;
+    if (cat) url += `&category=${encodeURIComponent(cat)}`;
+    if (team) url += `&team=${encodeURIComponent(team)}`;
+
+    const res = await fetch(url);
+    const data = await res.json();
+
+    const box = document.getElementById("comments");
+    box.innerHTML = "";
+
+    if (!data.comments.length) {
+        box.innerHTML = "<p class='text-gray-600'>Няма коментари.</p>";
+        return;
+    }
+
+    data.comments.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "comment-card";
+
+        div.innerHTML = `
+            <div class="text-blue-600 font-semibold">${c.author || "Анонимен"}</div>
+            <div class="text-sm text-gray-500">${new Date(c.published_at).toLocaleString()}</div>
+            <p class="mt-2">${c.comment_text}</p>
+            <div class="text-sm text-gray-700 mt-2">
+                👍 ${c.like_count || 0} ·
+                ${c.category || "—"} ·
+                ${c.teams ? c.teams.join(", ") : "—"}
+            </div>
+        `;
+
+        box.appendChild(div);
+    });
+}
+
+loadVideos();
+loadComments();
+</script>
+
+</body>
+</html>
